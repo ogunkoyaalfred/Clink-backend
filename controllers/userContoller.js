@@ -220,6 +220,7 @@ const loadPost = async (req, res) => {
 
     // fetch posts + populate user and comments
     const posts = await PostModel.find()
+      .sort({ createdAt: -1 })
       .populate("userId", "username email") // basic user info
       .populate("comments.userId", "username");
 
@@ -437,13 +438,26 @@ const getProfile = async (req, res) => {
       .sort({ createdAt: -1 }) // newest first
       .populate("userId", "username");
 
+    const postsWithProfiles = await Promise.all(
+      posts.map(async (post) => {
+        const profile = await ProfileModel.findOne({
+          profileUserId: post.userId._id,
+        }).select("fullname bio profilePicture");
+
+        return {
+          ...post.toObject(),
+          authorProfile: profile || null, // attach profile
+        };
+      })
+    );
+
     const user = await UserModel.findById(id).select("username"); // populate basic user info if needed
 
     res.status(200).send({
       stat: true,
       msg: "Profile fetched successfully",
       profile,
-      posts,
+      posts: postsWithProfiles,
       user,
     });
   } catch (error) {
