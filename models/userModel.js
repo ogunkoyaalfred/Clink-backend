@@ -32,6 +32,29 @@ const profileSchema = new mongoose.Schema({
   profilePicture: {type: String},
 })
 
+const conversationSchema = new mongoose.Schema(
+  {
+    participants: [
+      { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    ],
+    lastMessage: { type: String },
+    lastSender: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    updatedAt: { type: Date, default: Date.now },
+  },
+  { timestamps: true }
+);
+
+const messageSchema = new mongoose.Schema(
+  {
+    conversationId: { type: mongoose.Schema.Types.ObjectId, ref: "Conversation", required: true },
+    sender: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    text: { type: String, required: true },
+    readBy: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }], // optional: track read/unread
+  },
+  { timestamps: true }
+);
+
+
 let saltRound = 10
 userSchema.pre("save", function(next){
   bcrypt.hash(this.password, saltRound, (err, hashedPassword) => {
@@ -60,5 +83,7 @@ userSchema.methods.validatePassword = function(password, callback, next){
 const UserModel = mongoose.model("User", userSchema);
 const PostModel = mongoose.model("Post", postScema);
 const ProfileModel = mongoose.model("Profile", profileSchema)
+const ConversationModel = mongoose.model("Conversation", conversationSchema);
+const MessageModel = mongoose.model("Message", messageSchema);
 
-module.exports = { UserModel, PostModel, ProfileModel };
+module.exports = { UserModel, PostModel, ProfileModel, ConversationModel, MessageModel };

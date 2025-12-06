@@ -1,4 +1,4 @@
-const { UserModel, ProfileModel } = require("../models/userModel");
+const { UserModel, ProfileModel, ConversationModel, MessageModel } = require("../models/userModel");
 const { PostModel } = require("../models/userModel");
 const nodemailer = require("nodemailer");
 const dotenv = require("dotenv");
@@ -55,39 +55,54 @@ const saveUsers = (req, res) => {
 
 const authenticateUser = (req, res) => {
   const { email, password } = req.body;
-  UserModel.findOne({ email: email }).then((user) => {
-    if (user) {
+
+  UserModel.findOne({ email })
+    .then((user) => {
+      if (!user) {
+        return res.status(404).json({
+          stat: false,
+          msg: "Invalid email or password",
+        });
+      }
+
       user.validatePassword(password, (err, same) => {
+        if (err) {
+          return res.status(500).json({ stat: false, msg: "Server error" });
+        }
+
         if (!same) {
-          res.status(401).send({
+          return res.status(401).json({
             stat: false,
-            msg: "Authentication failed. Wrong email or password.",
-          });
-        } else {
-          let token = jwt.sign(
-            { id: user._id, email: user.email },
-            process.env.JWT_SECRET,
-            {
-              expiresIn: "1h",
-            }
-          );
-          res.status(200).send({
-            stat: true,
-            msg: "Authentication successful",
-            token,
-            user: {
-              id: user._id,
-              email: user.email,
-              username: user.username,
-            },
+            msg: "Invalid email or password",
           });
         }
+
+        const token = jwt.sign(
+          { id: user._id, email: user.email },
+          process.env.JWT_SECRET,
+          { expiresIn: "1h" }
+        );
+
+        return res.status(200).json({
+          stat: true,
+          msg: "Login successful",
+          token,
+          user: {
+            id: user._id,
+            email: user.email,
+            username: user.username,
+          },
+        });
       });
-    } else {
-      res.status(404).send({ stat: false, msg: "User not found" });
-    }
-  }).catch;
+    })
+    .catch(() => {
+      return res.status(500).json({
+        stat: false,
+        msg: "Server error, please try again later.",
+      });
+    });
 };
+
 
 const forgotPassword = async (req, res) => {
   const { email } = req.body;
@@ -470,6 +485,117 @@ const getProfile = async (req, res) => {
   }
 };
 
+const sendMessage = async (req, res) => {
+  try {
+    const { senderId, receiverId, text } = req.body;
+
+    if (!text.trim()) return res.status(400).json({ stat: false, msg: "Message is empty" });
+
+    // find or create conversation
+    let conversation = await ConversationModel.findOne({
+      participants: { $all: [senderId, receiverId] },
+    });
+
+    if (!conversation) {
+      conversation = await ConversationModel.create({
+        participants: [senderId, receiverId],
+        lastMessage: text,
+        lastSender: senderId,
+      });
+    }
+
+    // create message
+    const message = await MessageModel.create({
+      conversationId: conversation._id,
+      sender: senderId,
+      text,
+    });
+
+    // update conversation last message
+    conversation.lastMessage = text;
+    conversation.lastSender = senderId;
+    conversation.updatedAt = new Date();
+    await conversation.save();
+
+    const populatedMsg = await message.populate("sender", "username profilePicture");
+    res.status(201).json({ stat: true, message: populatedMsg, conversation });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ stat: false, msg: "Error sending message", error: err.message });
+  }
+};
+
+// Backend example
+const createConversation = async (req, res) => {
+  try {
+    const { senderId, receiverId } = req.body;
+
+    let conversation = await ConversationModel.findOne({
+      participants: { $all: [senderId, receiverId] },
+    }).populate("participants", "username profilePicture"); // populate participants
+
+    if (!conversation) {
+      conversation = await ConversationModel.create({
+        participants: [senderId, receiverId],
+        lastMessage: "",
+        lastSender: senderId,
+      });
+      conversation = await conversation.populate("participants", "username profilePicture");
+    }
+
+    res.status(200).json({ stat: true, conversation });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ stat: false, msg: "Error creating conversation", error: err.message });
+  }
+};
+
+
+
+const getConversations = async (req, res) => {
+  try {
+    const userId = req.params.userId;
+
+    const conversations = await ConversationModel.find({
+      participants: userId,
+    })
+      .sort({ updatedAt: -1 })
+      .populate({
+        path: "participants",
+        select: "username profilePicture", // ensure profilePicture is included
+      })
+      .populate({
+        path: "lastSender",
+        select: "username profilePicture", // include profilePicture if needed
+      });
+
+    res.status(200).json({ stat: true, conversations });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      stat: false,
+      msg: "Error fetching conversations",
+      error: err.message,
+    });
+  }
+};
+
+const getMessages = async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    const messages = await MessageModel.find({ conversationId })
+      .sort({ createdAt: 1 })
+      .populate("sender", "username profilePicture");
+
+    res.status(200).json({ stat: true, messages });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ stat: false, msg: "Error fetching messages", error: err.message });
+  }
+};
+
+
+
 module.exports = {
   saveUsers,
   authenticateUser,
@@ -482,4 +608,8 @@ module.exports = {
   getPostDetails,
   editProfile,
   getProfile,
+  sendMessage,
+  createConversation,
+  getConversations,
+  getMessages,
 };
